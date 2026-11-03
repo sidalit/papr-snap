@@ -1,0 +1,98 @@
+name: papr
+base: core26
+version: '0.16.1'
+title: Papr
+icon: snap/gui/papr.png
+summary: A local RSS reader with a desktop app and command-line companion
+description: |
+  Papr is a local-first RSS reader with feeds and folders, full-text
+  articles, tags, highlights, OPML import and export, an audio player,
+  newsletters and FreshRSS sync. Optional AI features use your own provider.
+
+  Open Papr from your application menu or run papr for the desktop.
+  Run papr.cli to read, search, refresh and manage the same local feeds
+  from the command line. Launch the desktop once to create the database.
+
+  This strictly confined snap stores its own data and settings. Configure
+  host agents to call papr.cli manually; automatic agent setup and the
+  application's launch-at-login setting are unavailable.
+license: MIT
+grade: stable
+confinement: strict
+website: https://github.com/l0ng-ai/papr
+source-code:
+  - https://github.com/l0ng-ai/papr
+  - https://github.com/sidalit/papr-snap
+issues:
+  - https://github.com/l0ng-ai/papr/issues
+  - https://github.com/sidalit/papr-snap/issues
+contact: https://github.com/sidalit/papr-snap/issues
+
+platforms:
+  amd64:
+  arm64:
+
+environment:
+  # Match the GNOME launcher's paths so the GUI and headless CLI share data.
+  XDG_DATA_HOME: $SNAP_USER_DATA/.local/share
+  XDG_CONFIG_HOME: $SNAP_USER_DATA/.config
+  XDG_CACHE_HOME: $SNAP_USER_COMMON/.cache
+
+apps:
+  papr:
+    command: bin/papr-desktop
+    extensions: [gnome]
+    plugs:
+      - audio-playback
+      - home
+      - network
+      - removable-media
+      - unity7
+
+  cli:
+    command: bin/papr
+    plugs:
+      - home
+      - network
+      - removable-media
+
+parts:
+  pnpm:
+    plugin: nil
+    build-snaps:
+      - node/22/stable
+    override-build: |
+      npm install --global --prefix "$CRAFT_PART_INSTALL" pnpm@9
+    prime: ['-*']
+
+  papr:
+    plugin: rust
+    source: https://github.com/l0ng-ai/papr.git
+    source-tag: v$SNAPCRAFT_PROJECT_VERSION
+    source-depth: 1
+    rust-channel: stable
+    after: [pnpm]
+    build-environment:
+      - PATH: $CRAFT_STAGE/bin:$PATH
+      - CARGO_BUILD_JOBS: $CRAFT_PARALLEL_BUILD_COUNT
+      - VITE_SNAP: '1'
+    build-packages:
+      - build-essential
+      - cmake
+      - libssl-dev
+      - patch
+      - pkg-config
+    override-pull: |
+      craftctl default
+      patch -p1 < "$CRAFT_PROJECT_DIR/snap/local/strict-desktop.patch"
+    override-build: |
+      pnpm install --frozen-lockfile
+      pnpm tauri build --no-bundle \
+        --config '{"plugins":{"updater":{"endpoints":[]}}}' -- --locked
+      cargo build --release --locked -p papr-cli
+
+      install -Dm755 target/release/papr-desktop target/release/papr \
+        -t "$CRAFT_PART_INSTALL/bin"
+      install -Dm644 "$CRAFT_PROJECT_DIR/snap/gui/papr.png" \
+        "$CRAFT_PART_INSTALL/usr/share/icons/hicolor/256x256/apps/papr.png"
+      install -Dm644 LICENSE "$CRAFT_PART_INSTALL/usr/share/doc/papr/LICENSE"

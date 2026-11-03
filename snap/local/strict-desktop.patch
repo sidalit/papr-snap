@@ -1,0 +1,98 @@
+--- a/src/lib/updater.ts
++++ b/src/lib/updater.ts
+@@ -19,6 +19,10 @@
+  * Settings passes `silent: false` so the user always gets feedback.
+  */
+ export async function checkForUpdates({ silent }: { silent: boolean }): Promise<void> {
++  if (import.meta.env.VITE_SNAP === "1") {
++    if (!silent) toast.show("Papr updates through the Snap Store. Run: sudo snap refresh papr");
++    return;
++  }
+   if (inFlight) return;
+   inFlight = true;
+   try {
+--- a/src/components/SettingsDialog.tsx
++++ b/src/components/SettingsDialog.tsx
+@@ -2,7 +2,6 @@
+ import { cloneElement, isValidElement, useEffect, useRef, useState } from "react";
+ import { useTranslation } from "react-i18next";
+ import { getVersion } from "@tauri-apps/api/app";
+-import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+ import * as api from "../api";
+ import { useUi, READER_BOUNDS, type OpenMode } from "../store";
+ import { useArticleActions } from "../hooks/articleActions";
+@@ -392,32 +391,6 @@
+   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+ }
+ 
+-/** Open-at-login toggle, backed by the OS via the autostart plugin. */
+-function LaunchAtLogin() {
+-  const { t } = useTranslation();
+-  const [on, setOn] = useState(false);
+-  useEffect(() => {
+-    isEnabled().then(setOn).catch(() => {});
+-  }, []);
+-  const change = async (v: boolean) => {
+-    try {
+-      if (v) await enable();
+-      else await disable();
+-      setOn(v);
+-    } catch (e) {
+-      reportError(e);
+-    }
+-  };
+-  return (
+-    <Row
+-      label={t("settings.general.launchAtLogin")}
+-      desc={t("settings.general.launchAtLoginDesc")}
+-    >
+-      <Toggle checked={on} onChange={change} />
+-    </Row>
+-  );
+-}
+-
+ /* ── general ─────────────────────────────────────────────── */
+ // Auto-refresh "off" is stored as a year-long interval — the only lever the
+ // backend scheduler exposes (it reads `refresh_interval_min`, minimum 5).
+@@ -522,7 +495,6 @@
+       </div>
+       <div className="settings-group">
+         <h3 className="settings-group-title">{t("settings.general.startup")}</h3>
+-        <LaunchAtLogin />
+         <Row
+           label={t("settings.general.startupView")}
+           desc={t("settings.general.startupViewDesc")}
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -143,11 +143,11 @@
+                         event.urls().iter().map(|u| u.to_string()).collect();
+                     handle_deep_links(&handle, &urls);
+                 });
+-                // On Linux/Windows dev builds, register the scheme at runtime
+-                // so `papr://` resolves without a full bundle install.
+-                #[cfg(any(windows, target_os = "linux"))]
+-                {
+-                    let _ = app.deep_link().register("papr");
++                // The snap desktop entry registers papr:// on the host.
++                // Recover cold-start links emitted before this callback existed.
++                if let Some(urls) = app.deep_link().get_current()? {
++                    let urls: Vec<String> = urls.iter().map(ToString::to_string).collect();
++                    handle_deep_links(app.handle(), &urls);
+                 }
+             }
+ 
+--- a/crates/papr-cli/src/setup.rs
++++ b/crates/papr-cli/src/setup.rs
+@@ -28,6 +28,12 @@
+ }
+ 
+ pub fn run(app: &str) -> Result<String, AxiError> {
++    if std::env::var_os("SNAP").is_some() {
++        return Err(AxiError::runtime_help(
++            "Automatic host-agent setup is unavailable in this snap",
++            vec!["Configure your agent to run /snap/bin/papr.cli manually".into()],
++        ));
++    }
+     let apps = App::parse(app).ok_or_else(|| {
+         AxiError::usage(
+             format!("unknown app target `{app}`"),
