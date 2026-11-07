@@ -69,11 +69,6 @@ sudo snap install snapcraft --classic
 snapcraft pack
 ```
 
-```bash
-sudo snap install --dangerous ./papr_*.snap
-papr
-```
-
 ## Support
 
 - **Installation or snap issues:** [open a packaging issue](https://github.com/sidalit/papr-snap/issues).
